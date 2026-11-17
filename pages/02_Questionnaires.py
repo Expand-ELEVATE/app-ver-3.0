@@ -1,5 +1,6 @@
-"""Questionnaires — state-role page, view available questionnaires and
-upload a translated CSV for the session's locked state.
+"""Questionnaires — shared between state-role and national-role
+sessions (via require_state_context()). View available questionnaires
+and upload a translated CSV for the active working state.
 
 Multiple questionnaires can exist at once (one national default plus
 any number of alternates). A state picks which one to use per-training
@@ -8,12 +9,15 @@ whichever questionnaire they plan to use.
 """
 import streamlit as st
 import pandas as pd
-from common import require_state_picked, get_client, fetch_all
+from common import require_state_context, get_client, fetch_all, NATIONAL_PSEUDO_STATE_CODE
 
-picked_state = require_state_picked()
+picked_state = require_state_context()
 sb = get_client()
 st.title("Questionnaires")
-st.caption(f"Working on state: **{st.session_state['picked_state_name']}** ({picked_state})")
+if picked_state == NATIONAL_PSEUDO_STATE_CODE:
+    st.caption("Working context: **National (all states)**")
+else:
+    st.caption(f"Working on state: **{picked_state}**")
 
 questionnaires = fetch_all(lambda: sb.table("questionnaire_meta").select("*").order("is_default", desc=True))
 if not questionnaires:

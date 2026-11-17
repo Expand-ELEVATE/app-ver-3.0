@@ -26,7 +26,15 @@ and the "Security note" in docs/ARCHITECTURE.md.
 import streamlit as st
 from supabase import create_client, Client
 
-LEVELS = ["State", "District", "Sub-District"]
+LEVELS = ["State", "District", "Sub-District"]  # staff's own self-reported level — unchanged by the National-training addition
+
+# Training's own Level field (separate dimension from staff's self-report
+# above) now has a 4th value, 'National', reserved for cross-state
+# trainings the national team creates — see require_state_context() and
+# the 'NAT' pseudo-state row in the `states` table.
+TRAINING_LEVELS = ["National", "State", "District", "Sub-District"]
+
+NATIONAL_PSEUDO_STATE_CODE = "NAT"
 
 
 @st.cache_resource
@@ -108,18 +116,22 @@ def require_role(allowed: list[str]):
 
 
 def require_state_picked() -> str:
-    """For state-role pages only (Manage Trainings, Questionnaires,
-    state-side Export). Forces an inline 'pick your state' step before
-    any state-scoped content loads, then LOCKS that choice for the rest
-    of the session — there is deliberately no 'switch state' button
-    anywhere. The only way to work on a different state is to log out
-    and log back in (per Dr Aswath's explicit decision). Returns the
-    picked state code."""
+    """For state-role sessions ONLY. Forces an inline 'pick your state'
+    step before any state-scoped content loads, then LOCKS that choice
+    for the rest of the session — there is deliberately no 'switch
+    state' button anywhere. The only way to work on a different state
+    is to log out and log back in (per Dr Aswath's explicit decision).
+    Excludes the 'NAT' pseudo-state (National-level trainings are the
+    national team's responsibility, not a state analyst's) — see
+    require_state_context() for the role-dispatching wrapper used by
+    pages now shared between state and national roles."""
     require_role(["state"])
     if "picked_state" not in st.session_state:
         st.info("Select the state you are working on for this login session.")
         states_res = get_client().table("states").select("code, name").order("name").execute()
-        options = {s["name"]: s["code"] for s in (states_res.data or [])}
+        options = {
+            s["name"]: s["code"] for s in (states_res.data or []) if s["code"] != NATIONAL_PSEUDO_STATE_CODE
+        }
         if not options:
             st.error("No states exist yet. Ask the national admin to add one.")
             st.stop()
@@ -130,6 +142,43 @@ def require_state_picked() -> str:
             st.rerun()
         st.stop()
     return st.session_state["picked_state"]
+
+
+def require_state_context() -> str:
+    """Role-dispatching wrapper for pages now shared between state-role
+    and national-role sessions (Manage Trainings, Questionnaires).
+
+    - 'state' role: delegates to require_state_picked() — LOCKED for the
+      whole session, as before, 'NAT' excluded.
+    - 'national' role: a freely re-pickable selector (no lock, no
+      confirm step, re-rendered every page load) that INCLUDES the
+      'NAT' pseudo-state, since the national team needs to select it
+      specifically to view/manage National-level trainings. National
+      admins already have full cross-state access via RLS/service_role
+      on their other pages, so locking them to one state here would be
+      pure friction with no security benefit.
+
+    Returns the active state code for this page view either way."""
+    require_role(["state", "national"])
+    if st.session_state["role"] == "state":
+        return require_state_picked()
+
+    states_res = get_client().table("states").select("code, name").order("name").execute()
+    options = {s["name"]: s["code"] for s in (states_res.data or [])}
+    if not options:
+        st.error("No states exist yet. Ask the national admin to add one.")
+        st.stop()
+    names = list(options.keys())
+    default_name = st.session_state.get("national_state_pick_name", names[0])
+    default_idx = names.index(default_name) if default_name in names else 0
+    pick = st.selectbox(
+        "Working state (you can change this anytime — this is NOT locked for national admins)",
+        names,
+        index=default_idx,
+        key="national_state_pick_selector",
+    )
+    st.session_state["national_state_pick_name"] = pick
+    return options[pick]
 
 
 def fetch_all(build_query, page_size: int = 1000) -> list[dict]:

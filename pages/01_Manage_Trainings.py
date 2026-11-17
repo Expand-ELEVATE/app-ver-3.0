@@ -1,24 +1,38 @@
-"""Manage Trainings — state-role page, scoped to the session's locked state.
+"""Manage Trainings — shared between state-role and national-role
+sessions. A state-role session is scoped to its session-locked state, as
+before. A national-role session gets a freely switchable state picker
+AND the extra 'National' training Level, for cross-state trainings the
+national team itself creates (e.g. a single refresher for all states).
 
-A training is NOT a staff record. The analyst specifies a training
-name, its level, and which questionnaire (default or an uploaded
-alternate) + language to use. Staff pick an OPEN training themselves on
-the no-login Pretest page and self-generate their own ID at pre-test
-submission.
+A training is NOT a staff record. The analyst/national-admin specifies
+a training name, its level, and which questionnaire (default or an
+uploaded alternate) + language to use. Staff pick an OPEN training
+themselves on the no-login Pretest page and self-generate their own ID
+at pre-test submission.
 
-v3 note: this page is the ONLY place a training's state is set, and it
-is set automatically from the session's LOCKED picked_state (via
-require_state_picked()) — there is deliberately no separate per-training
-state dropdown, since the lock already fixes it for the whole session.
+v3 note: for State/District/Sub-District level trainings, the state is
+set automatically from require_state_context()'s active state — there
+is no separate per-training state dropdown for those. The ONE exception
+is Level='National' (national role only): that always writes
+state_code='NAT' (a reserved pseudo-state row), regardless of whatever
+state is currently picked in the context selector above — a National
+training is inherently cross-state, not tied to whichever state the
+admin happened to be looking at a moment ago.
 """
 import streamlit as st
 import pandas as pd
-from common import require_state_picked, get_client, fetch_all, LEVELS
+from common import require_state_context, get_client, fetch_all, LEVELS, TRAINING_LEVELS, NATIONAL_PSEUDO_STATE_CODE
 
-picked_state = require_state_picked()
+picked_state = require_state_context()
+role = st.session_state["role"]
 sb = get_client()
 st.title("Manage Trainings")
-st.caption(f"Working on state: **{st.session_state['picked_state_name']}** ({picked_state})")
+
+if picked_state == NATIONAL_PSEUDO_STATE_CODE:
+    st.caption("Working context: **National (all states)**")
+else:
+    display_name = st.session_state.get("picked_state_name") or st.session_state.get("national_state_pick_name") or picked_state
+    st.caption(f"Working on state: **{display_name}** ({picked_state})")
 
 questionnaires = fetch_all(lambda: sb.table("questionnaire_meta").select("*").order("is_default", desc=True))
 if not questionnaires:
@@ -29,10 +43,18 @@ q_labels = {
     f"{q['title']}" + (" (default)" if q["is_default"] else ""): q["id"] for q in questionnaires
 }
 
-st.subheader(f"Create a new training for {picked_state}")
+level_options = TRAINING_LEVELS if role == "national" else LEVELS
+
+st.subheader("Create a new training")
 with st.form("new_training"):
     training_name = st.text_input("Training name (e.g. 'Q1 2026 Data Quality Refresher — District X')")
-    level = st.selectbox("Level of this training", LEVELS)
+    level = st.selectbox("Level of this training", level_options)
+    if role == "national":
+        st.caption(
+            "Picking 'National' creates a cross-state training (state_code = "
+            f"'{NATIONAL_PSEUDO_STATE_CODE}') regardless of the working state "
+            "selected above. Any other level uses the working state above."
+        )
     q_choice = st.selectbox("Questionnaire to use", list(q_labels.keys()))
     language = st.radio("Questionnaire language", ["default", "translated"], horizontal=True)
     submitted = st.form_submit_button("Create training")
@@ -40,25 +62,32 @@ with st.form("new_training"):
 if submitted:
     if not training_name.strip():
         st.error("Training name is required.")
+    elif level != "National" and picked_state == NATIONAL_PSEUDO_STATE_CODE:
+        st.error(
+            "Your working context is 'National (all states)', but you picked a "
+            "non-National level. Switch the working-state selector above to a "
+            "real state first, or change the Level to 'National'."
+        )
     else:
+        effective_state_code = NATIONAL_PSEUDO_STATE_CODE if level == "National" else picked_state
         questionnaire_id = q_labels[q_choice]
         if language == "translated":
             trans = (
                 sb.table("state_questionnaire_translations")
                 .select("question_no")
-                .eq("state_code", picked_state)
+                .eq("state_code", effective_state_code)
                 .eq("questionnaire_id", questionnaire_id)
                 .execute()
             )
             if not trans.data:
                 st.warning(
                     "No translated version uploaded yet for this questionnaire "
-                    f"for {picked_state}. Go to the Questionnaires page to "
+                    f"for {effective_state_code}. Go to the Questionnaires page to "
                     "upload one, or pick 'default' here."
                 )
         sb.table("trainings").insert(
             {
-                "state_code": picked_state,
+                "state_code": effective_state_code,
                 "training_name": training_name.strip(),
                 "level": level,
                 "questionnaire_id": questionnaire_id,
@@ -67,7 +96,7 @@ if submitted:
                 "created_by": st.session_state["user_id"],
             }
         ).execute()
-        st.success(f"Training '{training_name}' created for {picked_state} and OPEN for staff to self-enrol.")
+        st.success(f"Training '{training_name}' created ({effective_state_code}) and OPEN for staff to self-enrol.")
         st.rerun()
 
 st.divider()

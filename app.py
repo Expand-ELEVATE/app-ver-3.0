@@ -21,6 +21,12 @@ if role == "national":
     st.markdown(
         """
         You are logged in as a **National admin**. Use the sidebar for:
+        - **Manage Trainings** — create/open/close trainings for any
+          state, OR a cross-state **'National'**-level training
+          (available only to this role) — pick a working state freely
+          above the form; it is NOT locked like the shared state login.
+        - **Questionnaires** — view available questionnaires, upload a
+          translated CSV for whichever state you're currently working on.
         - **Dashboard** — paired pre/post counts and paired t-tests,
           filterable by state, by training, and by any combination of
           staff Levels.
@@ -36,6 +42,10 @@ if role == "national":
           (there is only ever one — see note below).
         - **Manage National Logins** — create/revoke/reset national
           admin logins (these ARE individually named, unlike state).
+
+        **New:** you now have the same Manage Trainings / Questionnaires
+        access as the shared state login, plus the ability to create a
+        **National**-level training that isn't tied to any single state.
         """
     )
 else:
