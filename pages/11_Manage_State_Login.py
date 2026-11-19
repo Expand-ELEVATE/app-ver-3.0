@@ -15,15 +15,6 @@ require_role(["national"])
 sb = get_admin_client()
 st.title("Manage State Login (shared)")
 
-st.warning(
-    "Dr Aswath's explicit decision: this is ONE single login shared by "
-    "every state's data analyst across every state. There is no "
-    "individual audit trail on the state side, and no database-level "
-    "isolation between states — see docs/ARCHITECTURE.md section 9. "
-    "Treat this password the same way you'd treat a shared building key: "
-    "rotate it whenever anyone who knew it no longer should."
-)
-
 
 def generate_temp_password(length: int = 14) -> str:
     alphabet = string.ascii_letters + string.digits + "!@#$%"
